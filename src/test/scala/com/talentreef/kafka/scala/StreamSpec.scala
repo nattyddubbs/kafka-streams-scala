@@ -126,7 +126,7 @@ class StreamSpec extends WordSpec with Matchers with EmbeddedKafkaStreamsAllInOn
       s1.join(s2, {
         (left: String, right: String) =>
           s"$left:$right"
-      }, JoinWindows.of(100)).to(outputTopic)
+      }, JoinWindows.of(500)).to(outputTopic)
 
       // Join these two into an output topic.
 
