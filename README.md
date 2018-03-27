@@ -9,7 +9,8 @@ The library wraps Java APIs in Scala thereby providing:
 3. the usual builder-style composition that developers get with the original Java API
 4. complete compile time type safety
 
-The design of the library was inspired by the work started by Alexis Seigneurin in [this repository](https://github.com/aseigneurin/kafka-streams-scala). 
+The design of the library was inspired by the typesafe library in [this repository](https://github.com/typesafe/kafka-streams-scala).
+While Lightbend chose to use implicit conversions this library leans more on type classes so as to avoid explicit imports. 
 
 ## Quick Start
 
@@ -18,25 +19,15 @@ The design of the library was inspired by the work started by Alexis Seigneurin 
 ```scala
 val kafka_streams_scala_version = "0.2.0"
 
-libraryDependencies ++= Seq("com.lightbend" %%
+libraryDependencies ++= Seq("com.talentreef" %%
   "kafka-streams-scala" % kafka_streams_scala_version)
 ```
 
 > Note: `kafka-streams-scala` supports onwards Kafka Streams `1.0.0`.
 
-The API docs for `kafka-streams-scala` is available [here](https://developer.lightbend.com/docs/api/kafka-streams-scala/0.2.0/com/lightbend/kafka/scala/streams) for Scala 2.12 and [here](https://developer.lightbend.com/docs/api/kafka-streams-scala_2.11/0.2.0/#package) for Scala 2.11.
-
 ## Running the Tests
 
 The library comes with an embedded Kafka server. To run the tests, simply run `sbt testOnly` and all tests will run on the local embedded server.
-
-> The embedded server is started and stopped for every test and takes quite a bit of resources. Hence it's recommended that you allocate more heap space to `sbt` when running the tests. e.g. `sbt -mem 2000`.
-
-```bash
-$ sbt -mem 2000
-> +clean
-> +test
-```
 
 ## Type Inference and Composition
 
@@ -62,34 +53,43 @@ val clicksPerRegion: KTableS[String, Long] = userClicksStream
 One of the areas where the Java APIs' verbosity can be reduced is through a succinct way to pass serializers and de-serializers to the various functions. The library uses the power of Scala implicits towards this end. The library makes some decisions that help implement more succinct serdes in a type safe manner:
 
 1. No use of configuration based default serdes. Java APIs allow the user to define default key and value serdes as part of the configuration. This configuration, being implemented as `java.util.Properties` is type-unsafe and hence can result in runtime errors in case the user misses any of the serdes to be specified or plugs in an incorrect serde. `kafka-streams-scala` makes this completely type-safe by allowing all serdes to be specified through Scala implicits.
-2. The libraty offers implicit conversions from serdes to `Serialized`, `Produced`, `Consumed` or `Joined`. Hence as a user you just have to pass in the implicit serde and all conversions to `Serialized`, `Produced`, `Consumed` or `Joined` will be taken care of automatically.
+2. The libraty offers implicit conversions to `Serialized`, `Produced`, `Consumed` or `Joined`. Hence as a user you just have to pass in the implicit `CanSerde` and all conversions to `Serialized`, `Produced`, `Consumed` or `Joined` will be taken care of automatically.
 
 
 ### Default Serdes
 
-The library offers a module that contains all the default serdes for the primitives. Importing the object will bring in scope all such primitives and helps reduce implicit hell.
+The library offers a `CanSerde` type class that has been implemented for all out of the box `Serde` implementations. If you have an additional type that you would like to serialize then implement a `CanSerde[T]` for that type in implicit scope of your streams.
+
+Since all builder APIs accept the `CanSerde` type class there are no explicit imports required.
 
 ```scala
-object DefaultSerdes {
-  implicit val stringSerde: Serde[String] = Serdes.String()
-  implicit val longSerde: Serde[Long] = Serdes.Long().asInstanceOf[Serde[Long]]
-  implicit val byteArraySerde: Serde[Array[Byte]] = Serdes.ByteArray()
-  implicit val bytesSerde: Serde[org.apache.kafka.common.utils.Bytes] = Serdes.Bytes()
-  implicit val floatSerde: Serde[Float] = Serdes.Float().asInstanceOf[Serde[Float]]
-  implicit val doubleSerde: Serde[Double] = Serdes.Double().asInstanceOf[Serde[Double]]
-  implicit val integerSerde: Serde[Int] = Serdes.Integer().asInstanceOf[Serde[Int]]
+/**
+  * Type class for types that can a serde can be generated for.
+  */
+trait CanSerde[T]{
+  def serde(): Serde[T]
+}
+
+object CanSerde{
+  /** A `String` can be serialized and deserialized **/
+  trait StringCanSerde extends CanSerde[String]{
+    override val serde: Serde[String] = Serdes.String()
+  }
+  implicit object StringCanSerde extends StringCanSerde
+  
+  // other out of the box CanSerde instances live here.
+}
+
+
+// Add your own implementation
+object MyTypeCanSerde extends CanSerde[MyType]{
+  def serde(): Serde[MyType] = ???
 }
 ```
 
-### Compile time typesafe
-
-Not only the serdes, but `DefaultSerdes` also brings into scope implicit  `Serialized`, `Produced`, `Consumed` and `Joined` instances. So all APIs that accept `Serialized`, `Produced`, `Consumed` or `Joined` will get these instances automatically with an `import DefaultSerdes._`.
-
-Just one import of `DefaultSerdes._` and the following code does not need a bit of `Serialized`, `Produced`, `Consumed` or `Joined` to be specified explicitly or through the default config. **And the best part is that for any missing instances of these you get a compilation error.** ..
+### Compile time typesafety
 
 ```scala
-import DefaultSerdes._
-
 val clicksPerRegion: KTableS[String, Long] =
   userClicksStream
 

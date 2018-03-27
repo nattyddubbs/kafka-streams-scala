@@ -1,8 +1,4 @@
-/**
- * Copyright (C) 2018 Lightbend Inc. <https://www.lightbend.com>
- */
-
-package com.lightbend.kafka.scala.streams
+package com.talentreef.kafka.streams
 
 import org.apache.kafka.streams.KeyValue
 import org.apache.kafka.streams.kstream._
@@ -18,33 +14,32 @@ import scala.collection.JavaConverters._
 class KStreamS[K, V](val inner: KStream[K, V]) {
 
   def filter(predicate: (K, V) => Boolean): KStreamS[K, V] = {
-    inner.filter(predicate(_, _))
+    new KStreamS(inner.filter(predicate(_, _)))
   }
 
   def filterNot(predicate: (K, V) => Boolean): KStreamS[K, V] = {
-    inner.filterNot(predicate(_, _))
+    new KStreamS(inner.filterNot(predicate(_, _)))
   }
 
   def selectKey[KR](mapper: (K, V) => KR): KStreamS[KR, V] = {
-    inner.selectKey[KR]((k: K, v: V) => mapper(k, v))
+    new KStreamS(inner.selectKey[KR]((k: K, v: V) => mapper(k, v)))
   }
 
   def map[KR, VR](mapper: (K, V) => (KR, VR)): KStreamS[KR, VR] = {
-    val kvMapper = mapper.tupled andThen tuple2ToKeyValue
-    inner.map[KR, VR]((k, v) => kvMapper(k,v))
+    new KStreamS(inner.map[KR, VR]((k, v) => mapper(k, v)))
   }
 
   def mapValues[VR](mapper: V => VR): KStreamS[K, VR] = {
-    inner.mapValues[VR](mapper(_))
+    new KStreamS(inner.mapValues[VR](mapper(_)))
   }
 
   def flatMap[KR, VR](mapper: (K, V) => Iterable[(KR, VR)]): KStreamS[KR, VR] = {
-    val kvMapper = mapper.tupled andThen (iter => iter.map(tuple2ToKeyValue).asJava)
-    inner.flatMap[KR, VR]((k,v) => kvMapper(k , v))
+    val kvMapper = mapper.tupled andThen (iter => iter.map(t => ImplicitConversions.tupleToKeyValue(t)).asJava)
+    new KStreamS(inner.flatMap[KR, VR]((k,v) => kvMapper(k , v)))
   }
 
   def flatMapValues[VR](processor: V => Iterable[VR]): KStreamS[K, VR] = {
-    inner.flatMapValues[VR]((v) => processor(v).asJava)
+    new KStreamS(inner.flatMapValues[VR]((v) => processor(v).asJava))
   }
 
   def print(printed: Printed[K, V]): Unit = inner.print(printed)
@@ -54,14 +49,14 @@ class KStreamS[K, V](val inner: KStream[K, V]) {
   }
 
   def branch(predicates: ((K, V) => Boolean)*): Array[KStreamS[K, V]] = {
-    inner.branch(predicates.map(_.asPredicate): _*).map(kstream => wrapKStream(kstream))
+    inner.branch(predicates.map(_.asPredicate): _*).map(kstream => new KStreamS(kstream))
   }
 
-  def through(topic: String)(implicit produced: Produced[K, V]): KStreamS[K, V] =
-    inner.through(topic, produced)
+  def through(topic: String)(implicit canBeProduced: CanBeProduced[K, V]): KStreamS[K, V] =
+    new KStreamS(inner.through(topic, canBeProduced.produced()))
 
-  def to(topic: String)(implicit produced: Produced[K, V]): Unit =
-    inner.to(topic, produced)
+  def to(topic: String)(implicit canBeProduced: CanBeProduced[K, V]): Unit =
+    inner.to(topic, canBeProduced.produced())
 
   //scalastyle:off null
   def transform[K1, V1](transformerSupplier: () => Transformer[K, V, (K1, V1)],
@@ -90,7 +85,7 @@ class KStreamS[K, V](val inner: KStream[K, V]) {
         override def close(): Unit = transformerS.close()
       }
     }
-    inner.transform(transformerSupplierJ, stateStoreNames: _*)
+    new KStreamS(inner.transform(transformerSupplierJ, stateStoreNames: _*))
   }
   //scalastyle:on null
 
@@ -98,7 +93,7 @@ class KStreamS[K, V](val inner: KStream[K, V]) {
     stateStoreNames: String*): KStreamS[K, VR] = {
 
     val valueTransformerSupplierJ: ValueTransformerSupplier[V, VR] = () => valueTransformerSupplier()
-    inner.transformValues[VR](valueTransformerSupplierJ, stateStoreNames: _*)
+    new KStreamS(inner.transformValues[VR](valueTransformerSupplierJ, stateStoreNames: _*))
   }
 
   def process(processorSupplier: () => Processor[K, V],
@@ -124,57 +119,63 @@ class KStreamS[K, V](val inner: KStream[K, V]) {
    * implicit val longSerde: Serde[Long] = Serdes.Long().asInstanceOf[Serde[Long]]
    * - .groupByKey
    */
-  def groupByKey(implicit serialized: Serialized[K, V]): KGroupedStreamS[K, V] =
-    inner.groupByKey(serialized)
+  def groupByKey(implicit canBeSerialized: CanBeSerialized[K, V]): KGroupedStreamS[K, V] =
+    new KGroupedStreamS(inner.groupByKey(canBeSerialized.serialized()))
 
-  def groupBy[KR](selector: (K, V) => KR)(implicit serialized: Serialized[KR, V]): KGroupedStreamS[KR, V] =
-    inner.groupBy(selector.asKeyValueMapper, serialized)
+  def groupBy[KR](selector: (K, V) => KR)(implicit canBeSerialized: CanBeSerialized[KR, V]): KGroupedStreamS[KR, V] =
+    new KGroupedStreamS(inner.groupBy(selector.asKeyValueMapper, canBeSerialized.serialized()))
 
   def join[VO, VR](otherStream: KStreamS[K, VO],
     joiner: (V, VO) => VR,
-    windows: JoinWindows)(implicit joined: Joined[K, V, VO]): KStreamS[K, VR] =
-      inner.join[VO, VR](otherStream.inner, joiner.asValueJoiner, windows, joined)
+    windows: JoinWindows)(implicit canBeJoined: CanBeJoined[K, V, VO]): KStreamS[K, VR] =
+      new KStreamS(inner.join[VO, VR](otherStream.inner, joiner.asValueJoiner, windows, canBeJoined.joined()))
 
   def join[VT, VR](table: KTableS[K, VT],
-    joiner: (V, VT) => VR)(implicit joined: Joined[K, V, VT]): KStreamS[K, VR] =
-      inner.leftJoin[VT, VR](table.inner, joiner.asValueJoiner, joined)
+    joiner: (V, VT) => VR)(implicit canBeJoined: CanBeJoined[K, V, VT]): KStreamS[K, VR] =
+      new KStreamS(inner.leftJoin[VT, VR](table.inner, joiner.asValueJoiner, canBeJoined.joined()))
 
   def join[GK, GV, RV](globalKTable: GlobalKTable[GK, GV],
     keyValueMapper: (K, V) => GK,
     joiner: (V, GV) => RV): KStreamS[K, RV] =
-      inner.join[GK, GV, RV](globalKTable, keyValueMapper(_,_), joiner(_,_))
+      new KStreamS(inner.join[GK, GV, RV](globalKTable, keyValueMapper(_,_), joiner(_,_)))
 
   def leftJoin[VO, VR](otherStream: KStreamS[K, VO],
     joiner: (V, VO) => VR,
-    windows: JoinWindows)(implicit joined: Joined[K, V, VO]): KStreamS[K, VR] =
-      inner.leftJoin[VO, VR](otherStream.inner, joiner.asValueJoiner, windows, joined)
+    windows: JoinWindows)(implicit canBeJoined: CanBeJoined[K, V, VO]): KStreamS[K, VR] =
+      new KStreamS(inner.leftJoin[VO, VR](otherStream.inner, joiner.asValueJoiner, windows, canBeJoined.joined()))
 
   def leftJoin[VT, VR](table: KTableS[K, VT],
-    joiner: (V, VT) => VR)(implicit joined: Joined[K, V, VT]): KStreamS[K, VR] =
-      inner.leftJoin[VT, VR](table.inner, joiner.asValueJoiner, joined)
+    joiner: (V, VT) => VR)(implicit canBeJoined: CanBeJoined[K, V, VT]): KStreamS[K, VR] =
+      new KStreamS(inner.leftJoin[VT, VR](table.inner, joiner.asValueJoiner, canBeJoined.joined()))
 
   def leftJoin[GK, GV, RV](globalKTable: GlobalKTable[GK, GV],
     keyValueMapper: (K, V) => GK,
     joiner: (V, GV) => RV): KStreamS[K, RV] = {
 
-    inner.leftJoin[GK, GV, RV](globalKTable, keyValueMapper.asKeyValueMapper, joiner.asValueJoiner)
+    new KStreamS(inner.leftJoin[GK, GV, RV](globalKTable, keyValueMapper.asKeyValueMapper, joiner.asValueJoiner))
   }
 
   def outerJoin[VO, VR](otherStream: KStreamS[K, VO],
     joiner: (V, VO) => VR,
-    windows: JoinWindows)(implicit joined: Joined[K, V, VO]): KStreamS[K, VR] =
-      inner.outerJoin[VO, VR](otherStream.inner, joiner.asValueJoiner, windows, joined)
+    windows: JoinWindows)(implicit canBeJoined: CanBeJoined[K, V, VO]): KStreamS[K, VR] =
+      new KStreamS(inner.outerJoin[VO, VR](otherStream.inner, joiner.asValueJoiner, windows, canBeJoined.joined()))
 
-  def merge(stream: KStreamS[K, V]): KStreamS[K, V] = inner.merge(stream)
+  def merge(stream: KStreamS[K, V]): KStreamS[K, V] = new KStreamS(inner.merge(stream.inner))
 
   def peek(action: (K, V) => Unit): KStreamS[K, V] = {
-    inner.peek(action(_,_))
+    new KStreamS(inner.peek(action(_,_)))
   }
 
   // -- EXTENSIONS TO KAFKA STREAMS --
 
-  // applies the predicate to know what messages should go to the left stream (predicate == true)
-  // or to the right stream (predicate == false)
+  /**
+    * Apply the provided predicate to the stream and split to the left when the predicate
+    * is true and to the right when the predicate is false.
+    * @param predicate The predicate that will be applied to every entry in the stream.
+    * @return          A `Tuple2` where the first value is a stream for which the predicate
+    *                  is true and the second value is a stream for which the predicate
+    *                  is false.
+    */
   def split(predicate: (K, V) => Boolean): (KStreamS[K, V], KStreamS[K, V]) = {
     (this.filter(predicate), this.filterNot(predicate))
   }

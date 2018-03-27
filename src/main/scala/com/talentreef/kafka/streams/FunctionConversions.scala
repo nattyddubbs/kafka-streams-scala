@@ -1,8 +1,4 @@
-/**
- * Copyright (C) 2018 Lightbend Inc. <https://www.lightbend.com>
- */
-
-package com.lightbend.kafka.scala.streams
+package com.talentreef.kafka.streams
 
 import org.apache.kafka.streams.KeyValue
 import org.apache.kafka.streams.kstream._
@@ -49,5 +45,4 @@ object FunctionConversions {
   implicit class InitializerFromFunction[T](val f: () => T) extends AnyVal {
     def asInitializer: Initializer[T] = () => f()
   }
-
 }
