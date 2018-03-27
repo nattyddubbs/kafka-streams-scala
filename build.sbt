@@ -4,7 +4,9 @@ name := "kafka-streams-scala"
 
 organization := "com.talentreef"
 
-version := "0.2.0"
+version := "0.2.0-SNAPSHOT"
+
+isSnapshot := true
 
 scalaVersion := Versions.Scala_2_12_Version
 
@@ -29,6 +31,8 @@ organizationName := "talentreef"
 
 organizationHomepage := Some(url("http://talentreef.com/"))
 
+scmInfo := Some(ScmInfo(url("https://github.com/nattyddubbs/kafka-streams-scala"), "git@github.com:nattyddubbs/kafka-streams-scala.git"))
+
 homepage := scmInfo.value map (_.browseUrl)
 
 publishTo := {
@@ -37,4 +41,13 @@ publishTo := {
   else Some("releases" at nexus + "service/local/staging/deploy/maven2")
 }
 
+credentials += Credentials(
+  "Nexus Repository Manager",
+  "oss.sonatype.org",
+  userName = System.getenv("OSS_USER"),
+  passwd = System.getenv("OSS_PASSWORD")
+)
+
 publishArtifact in Test := false
+
+publishMavenStyle := true
